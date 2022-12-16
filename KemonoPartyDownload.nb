@@ -1,0 +1,134 @@
+(*清除定义*)
+Clear["Global`*"];
+GetProperty[
+   HoldPattern[session_WebSessionObject : $CurrentWebSession], 
+   element_WebElementObject, property_String] := 
+  "value" /. 
+   ImportString[
+    FromCharacterCode[
+     ToCharacterCode[
+      URLRead[ReplacePart[URLParse[element["URL"]], 
+        "Path" -> {"session", element["SessionID"], "element", 
+          element["ElementId"], "property", "innerHTML"}], "Body"], 
+      "UTF8"], "Unicode"], "JSON"];
+VilidFileName[file_String] := 
+  StringReplace[
+   file, {"\\" -> "＼", "/" -> "／", ":" -> "：", "*" -> "\[Times]", 
+    "?" -> "？", "\"" -> "\[OpenCurlyDoubleQuote]", "<" -> "《", 
+    ">" -> "》", "|" -> "丨"}];
+(*下载某一作者最新的数个帖子*)
+KemonoPartyDownload[url_String, dir_String, 
+   n : (n_Integer /; n >= 1) : 10^8] :=
+  Module[{session, pause, postsTotalNumber, postsUTA, postIFCH, 
+    imageElementTemp, fileElementTemp, contentElementTemp, fileName, 
+    downloadResult},
+   (*在当前会话和将来的会话中不使用任何代理*)
+   $DefaultProxyRules["UseProxy"] = None;
+   (*创建输出目录*)
+   Quiet[CreateDirectory[dir]];
+   (*设置工作目录*)
+   SetDirectory[dir];
+   (*开启网络会话*)
+   session = StartWebSession["Firefox", Visible -> True];
+   (*打开网页*)
+   WebExecute["OpenPage" -> url];
+   (*等待DDos保护验证*)
+   pause = 6;
+   Pause[pause];
+   (*获取帖子总数*)
+   postsTotalNumber = 
+    ToExpression[
+     StringExtract[
+      WebExecute[
+        "ElementText" -> 
+         "XPath" -> "//*[@id=\"paginator-top\"]/small"][[1]], 
+      " of " -> -1]];
+   (*获取帖子链接、帖子标题、帖子附件个数，从老到新排序*)
+   postsUTA = Flatten[Table[
+       If[i != 0, 
+        WebExecute["OpenPage" -> url <> "?o=" <> IntegerString[i]]; 
+        Pause[pause]];
+       {"https://kemono.party" <> 
+            WebExecute["ElementAttribute" -> {#, "href"}] & /@ 
+          WebExecute[
+           "LocateElements" -> 
+            "XPath" -> 
+             "//*[@id=\"main\"]/section/div[3]/div[2]/article/a"], 
+         StringTrim[
+          WebExecute[
+           "ElementText" -> 
+            "XPath" -> 
+             "//*[@id=\"main\"]/section/div[3]/div[2]/article/a/\
+header"]], 
+         ToExpression[
+          StringDelete[
+            WebExecute[
+             "ElementText" -> 
+              "XPath" -> 
+               "//*[@id=\"main\"]/section/div[3]/div[2]/article/a/\
+footer/div"], " attachment" ~~ "" | "s"] /. 
+           "No" -> 0]}\[Transpose], {i, 0, 
+        Min[postsTotalNumber - 1, n - 1], 50}], 1][[
+     Min[postsTotalNumber, n] ;; 1 ;; -1]];
+   postIFCH = Table[
+     WebExecute["OpenPage" -> postsUTA[[j, 1]]];
+     Pause[pause/3];
+     {Quiet[
+       Check["https://kemono.party" <> 
+           WebExecute["ElementAttribute" -> {#, "href"}] & /@ 
+         Rest[WebExecute[
+           "LocateElements" -> 
+            "CSSSelector" -> "a.fileThumb.image-link"]], {}]], 
+      "https://kemono.party" <> 
+         WebExecute["ElementAttribute" -> {#, "href"}] & /@ 
+       WebExecute[
+        "LocateElements" -> 
+         "CSSSelector" -> "a.post__attachment-link"], 
+      Quiet[Check[
+        WebExecute[
+          "ElementText" -> "CSSSelector" -> "div.post__content"][[1]],
+         ""]], Quiet[
+       Check[GetProperty[
+         WebExecute[
+           "LocateElements" -> "CSSSelector" -> "div.post__content"][[
+          1]], "innerHTML"], ""]]}, {j, 1, Length[postsUTA]}];
+   downloadResult = Table[
+     If[Length[postIFCH[[j, 2]]] >= 1, 
+      Print[postsUTA[[j, 1]] <> " 有下载内容，请检查！"]]; 
+     If[StringContainsQ[postIFCH[[j, 4]], "http"], 
+      Print[postsUTA[[j, 1]] <> " 有外部链接，请检查！"]];
+     If[Length[postIFCH[[j, 1]]] + Length[postIFCH[[j, 2]]] != 
+       postsUTA[[j, 3]], Print[postsUTA[[j, 1]] <> " 的数量有误，请检查！"]];
+     If[postsUTA[[j, 3]] == 0, 
+      Export[StringExtract[postsUTA[[j, 1]], "/" -> -1] <> 
+        " - 01 - " <> VilidFileName[postsUTA[[j, 2]]] <> ".txt", 
+       postIFCH[[j, 3]] <> "\n\n\n\n\n" <> postIFCH[[j, 4]]]]; 
+     Table[If[k <= Length[postIFCH[[j, 1]]],
+       fileName = 
+        StringExtract[postsUTA[[j, 1]], "/" -> -1] <> " - " <> 
+         IntegerString[k, 10, 2] <> " - " <> 
+         VilidFileName[postsUTA[[j, 2]]] <> "." <> 
+         StringExtract[postIFCH[[j, 1, k]], "." -> -1]; 
+       RunProcess[{"idman", "/d", postIFCH[[j, 1, k]], "/p", 
+         Directory[], "/f", fileName, "/n"}], 
+       fileName = 
+        StringExtract[postsUTA[[j, 1]], "/" -> -1] <> " - " <> 
+         IntegerString[k, 10, 2] <> " - " <> 
+         VilidFileName[postsUTA[[j, 2]]] <> "." <> 
+         StringExtract[postIFCH[[j, 2, k - Length[postIFCH[[j, 1]]]]],
+           "." -> -1]; 
+       RunProcess[{"idman", "/d", 
+         postIFCH[[j, 2, k - Length[postIFCH[[j, 1]]]]], "/p", 
+         Directory[], "/f", fileName, "/n"}]];
+      Pause[pause];
+      File[Directory[] <> "\\" <> fileName], {k, 1, 
+       Length[postIFCH[[j, 1]]] + Length[postIFCH[[j, 2]]]}], {j, 1, 
+      Length[postsUTA]}];
+   (*关闭网络会话*)
+   DeleteObject[session];
+   (*重设为前一个工作目录*)
+   ResetDirectory[];
+   (*恢复代理设置原始值*)
+   $DefaultProxyRules["UseProxy"] = Automatic;
+   Return[Flatten[downloadResult]]
+   ];
